@@ -65,9 +65,9 @@ def ask(string, answers = None, dtype = 'string', table = False):
         else:
             try:
                 if dtype == "float": 
-                    inp = float(inp)
+                    inp = abs(float(inp))
                 elif dtype == "integer":
-                    inp = int(inp)
+                    inp = abs(int(inp))
                 else:
                     inp = str(inp)
             except:
@@ -124,14 +124,14 @@ def ask_table(headers, answers, types, rows):
 
     return table
 
-# ------ User interface -----
+# ------ User Interface DRAFT -----
 if __name__ == "__main__":
     '''this is the main user interface to be replicated in SAM'''
     
     clear_console()
     end = False
     while not end:
-        print("----------\nWelcome to the SAM user interface draft 3. \nThis built to work in command consoles.\nThis attempts to simulate the dropdown menu paths you can take with the proposed SAM user interface. \nOnce you fill out all the required information for a given path you will see the cost printed. \nYou can restart the script at any time by typing restart as an input. \nYou can end the script at any time by typing exit as an input. \nEnjoy!\n----------")
+        print("----------\nWelcome to the SAM user interface draft 3. \nThis built to work in command consoles.\nThis attempts to simulate the dropdown menu paths you can take with the proposed SAM user interface. \nOnce you fill out all the required information for a given path you will see the cost printed. \nYou can restart the script at any time by typing restart as an input. \nYou can end the script at any time by typing exit as an input.\n\nDISCLAIMER: This is a work in progress, and there are no checks to ensure inputs are realsitic for the described systems. \nAll negative numerical inputs are assumed positive via abs() \n\nEnjoy!\n----------")
         try:
             inputs = ask("Import WEC? (y/n) ", ["y","n"])
             if inputs == "y":
@@ -170,12 +170,14 @@ if __name__ == "__main__":
 
                     inputs = ask("Level of input (1: mooring library, 2: line data, 3: full mooring data)? ", ["1", "2", "3"])
                     if inputs == "1": # mooring library 
+                        
+                        # default is catenary
+                        inputs1 = ask("Mooring configuration [default is catenary] (catenary, semi-taut, taut, tension)? ", ["catenary", "semi-taut", "taut", "tension"])
+                        inputs2 = ask("Design load (kN)? ", dtype = "float")
+                        # default is sand
+                        inputs3 = ask("Soil type [default is sand] (soft clay, medium clay, hard clay, sand)? ", ["soft clay", "medium clay", "hard clay", "sand"])
 
-                        inputs1 = ask("Mooring configuration (catenary, semi-taut, taut, tension)? ", ["catenary", "semi-taut", "taut", "tension"])
-                        inputs2 = ask("Design load (N)? ", dtype = "float") # TODO: check negatives
-                        inputs3 = ask("Soil type (soft clay, medium clay, hard clay, sand)? ", ["soft clay", "medium clay", "hard clay", "sand"])
-
-                        model.set_paramsA1(shape = inputs1, depth = depth, design_MBL = inputs2, soil_type = inputs3, Buoy_Table = buoys)
+                        model.set_paramsA1(shape = inputs1, depth = depth, design_load = inputs2, soil_type = inputs3, Buoy_Table = buoys)
 
                     elif inputs == "2": # line data 
 
@@ -198,7 +200,7 @@ if __name__ == "__main__":
                         lines = ask_table(headers, answers, types, inputs1) # a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter (m)", "Length (m)"
 
                         inputs2 = ask("How many different anchor types are in your design? ", dtype="integer")
-                        headers = ["Num of these anchors", "Anchor type (drag-embedment, gravity, VLA, SEPLA, suction)", "Mass (kg)", "Soil type (soft clay, medium clay, hard clay, sand)"]
+                        headers = ["Num of these anchors", "Anchor type (drag-embedment, gravity, VLA, SEPLA, suction)", "Mass (kg)", "Soil type (soft clay, medium clay, hard clay, sand)"] # soilType unused
                         answers = [None, ["drag-embedment", "gravity", "VLA", "SEPLA", "suction"], None, ["soft clay", "medium clay", "hard clay", "sand"]] # acceptable answers
                         types = ["integer","string","float","string"] # data types for each entry
                         anchors = ask_table(headers, answers, types, inputs2) # a list of lists, one for each anchor type in the system. Values are: "Num of these anchors", "Anchor type", "Mass (kg)", "Soil type"
@@ -210,6 +212,7 @@ if __name__ == "__main__":
                         raise Restart
 
                     model.calc_cost()
+                    print("INFO: connections are sized based on the MBL of the attached lines")
 
                 else:
                     print("This model does not support fixed bottom. Restarting...")
@@ -224,7 +227,7 @@ if __name__ == "__main__":
                 raise End
 
         except Restart:
-            time.sleep(1.5)
+            time.sleep(1)
             clear_console()
         except End:
             clear_console()

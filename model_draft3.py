@@ -17,7 +17,8 @@ TODO:
 [X] add semi-taut mooring configuration option
 [X] allow for multiple lines, anchors, buoys, etc. This needs to be done before more front end work
 [X] remove hardcoded coefficients and add in MoorPy dependency
-[ ] check entire dependency on custom MoorPy yamls. (i.e. chain, hmpe, etc. not in here at all expect for default params). Eventually same for points 
+[X] check entire dependency on custom MoorPy yamls. (i.e. chain, hmpe, etc. not in here at all expect for default params). Eventually same for points 
+[X] Auto length selection
 
 """
 
@@ -142,7 +143,7 @@ class backend():
         Parameters
         ----------
         design_load : float
-            the design load for the line [N]
+            the design load for the line [kN]
         material : string
             the line type material keyword. Options are: chain, polyester, nylon, wire, hmpe
         diam : float
@@ -155,20 +156,19 @@ class backend():
         dictionary
             A lineType dictionary
         '''
-        dLoad = design_load
 
         if material == None:
             raise Exception("Material not provided")
 
-        if dLoad == None and diam == None:
+        if design_load == None and diam == None:
             raise Exception("Either design load or diameter is needed to load moorpy data")
-        elif dLoad != None and diam != None:
+        elif design_load != None and diam != None:
             print("WARNING: Both design load and diameter provided to getLine. input diameter will be used.")
-            dLoad = None
+            design_load = None
 
-        if dLoad != None:
-            if dLoad >= 0: 
-                dnommm = self.find_diam(design_load, material, fos=fos) / 0.001 # in mm for MP input
+        if design_load != None:
+            if design_load >= 0: 
+                dnommm = self.find_diam(design_load*1000, material, fos=fos) / 0.001 # in mm for MP input
             else:
                 raise Exception("Design load must be greater than zero")
         elif diam != None:
@@ -197,7 +197,7 @@ class backend():
         a_type : string 
             keyword that identifies the anchor type. Options are: drag-embedment, gravity, VLA, SEPLA, suction
         load : float
-            the design load for the anchor [N]
+            the design load for the anchor [kN]
         load_dir : string
             keyword to identify anchor load direction. Options are: vertical, horizontal, both
         mass : float
@@ -213,7 +213,10 @@ class backend():
             the anchor type
         '''        
 
+        # Find mass if not provided. Also find anchor type if not provided
         if mass == None and load != None and load_dir != None:
+
+            load = load * 1000 # convert from kN to N
 
             if load_dir == "horizontal":
                 loadx = load
@@ -245,31 +248,31 @@ class backend():
                     a_type = "gravity"
                     print(f"INFO: Anchor type set to '{a_type}'")
             else:
-                print("WARNING: load direction not recognized, assuming no vertical loading and drag anchor") # TODO: should this be changed to a safer assumption?
-                a_type = "drag-embedment"
+                print("WARNING: load direction not recognized, assuming input load for vertical and horizontal and gravity anchor")
+                a_type = "gravity"
                 loadx = load
-                loadz = 0.0
-
-            outputs = mp.getAnchorCost(fx = loadx, fz = loadz, type = a_type, soil_type = soil_type, method = 'dynamic')
+                loadz = load
+                        
+            outputs = mp.getAnchorMass(uhc_mode = False, fx = loadx, fz = loadz, anchor = a_type, soil_type = soil_type, method = 'dynamic')
             if outputs == Exception:
                 raise outputs
             
-            mass = outputs[3]["Mass"] # from the MoorPy info data structure
+            mass = outputs[1] # outpus = uhc, mass, info
 
             print(f"INFO: '{a_type}' anchor mass set to {mass:.3f} kg for load direction '{load_dir}' and soil type '{soil_type}'" )
         
-        elif mass != None and load == None and load_dir == None:
-
-            outputs = mp.getAnchorCost(fx = None, fz = None, type = a_type, mass = mass, soil_type = soil_type, method = 'dynamic')
-            if outputs == Exception:
-                raise outputs
-            
         else:
-            raise ValueError("Invalid input combo to getAnchor")
+            if mass == None and a_type == None:
+                raise ValueError("Invalid input combo to getAnchor")
+        
+        # overwrite structure in self.pointProps. Most basic struture that gives anchor data from PointProps_default.yaml to find costs with getPointProps
+        aProps = self.pointProps["AnchorProps"]
+        aProps[a_type]["mass"] = mass
+        
+        props = dict(DesignProps = dict(anchor = {f"num_a_{a_type}" : 1}), AnchorProps = aProps, BuoyProps = dict(placeholder = "placeholder"), ConnectProps = dict(placeholder = "placeholder")) # this is a dummy pointprops starting point that mimics a pointprops yaml. Passing it to loadPointProps will initialize all the unused variables that are needed for the code.
+        MP_data = helpers.getPointProps(design = "anchor", Props = helpers.loadPointProps(props))
     
-        cost = outputs[0] + outputs[1] + outputs[2] # Summing the first three outputs of MoorPy getAnchorCost: anchorMatCost, anchorInstCost, anchorDecomCost
-
-        return cost, mass, a_type
+        return MP_data["cost"], MP_data["m"], a_type
     
     def getBuoy(self, buoyancy):
         '''Determines the cost of a buoy based on the defaults in MoorPy.
@@ -290,10 +293,9 @@ class backend():
         # overwrite structure in self.pointProps. Most basic struture that gives buoys data from PointProps_default.yaml
         bProps = self.pointProps["BuoyProps"]
         bProps["general"]["buoyancy"] = buoyancy 
-        props = dict(PointProps = dict(buoy = dict(num_b_general = 1, design_load = 0)), BuoyProps = bProps, ConnectProps = dict(placeholder = "placeholder")) # this is a dummy pointprops starting point that mimics a pointprops yaml. Passing it to loadPointProps will initialize all the unused variables that are needed for the code.
+        props = dict(DesignProps = dict(buoy = {"num_b_general" : 1}), AnchorProps = dict(placeholder = "placeholder"), BuoyProps = bProps, ConnectProps = dict(placeholder = "placeholder")) # this is a dummy pointprops starting point that mimics a pointprops yaml. Passing it to loadPointProps will initialize all the unused variables that are needed for the code.
         
-        
-        MP_data = helpers.getPointProps(Type = "buoy", Props = helpers.loadPointProps(props)) # a moorpy pointType structure (dictionary)
+        MP_data = helpers.getPointProps(design = "buoy", Props = helpers.loadPointProps(props)) # a moorpy pointType structure (dictionary)
 
         return MP_data["cost"]
 
@@ -305,7 +307,7 @@ class backend():
         Parameters
         ----------
         design_load : float
-            the design load of the connection [N]
+            the design load of the connection [kN]
         
         Returns
         -------
@@ -316,7 +318,7 @@ class backend():
             raise Exception("Design load must be greater than zero")
         
         # general type uses the PointProps general design
-        MP_data = helpers.getPointProps(design_load = design_load, Type = "general", Props = self.pointProps) # a moorpy pointType structure (dictionary)
+        MP_data = helpers.getPointProps(design_load = design_load, design = "general", Props = self.pointProps) # a moorpy pointType structure (dictionary)
 
         return MP_data["cost"] # only cost data reutrned for now, mass coefficients not yet known
 
@@ -344,9 +346,8 @@ class model():
     Units:
     ------
     depth: m
-    design_load: N
+    design_load: kN
     line_diam: m
-    P: N/m
     line_length: m
     anchor_mass: kg
     con_mass: kg
@@ -450,15 +451,13 @@ class model():
             self.BuoyTypes.append(self.buoy_type.copy())
 
     def set_paramsA0(self):
-        '''Calcaultes the default mooring system design with no user inputs. This is a testing function.
+        '''Calculates the default mooring system design with no user inputs. This is a testing function.
         '''
-
-        print("Using default parameters (catenary shape)")
 
         # system values
         self.depth = 200 # m
         soil_type = "soft clay"
-        design_load = 10000 * 10**3 # N
+        design_load = 1000 # kN
         
         # inflation adjustment from 2024$
         self.inflation_scale = 1.0 # optional
@@ -480,8 +479,7 @@ class model():
 
 
         # Calculate length with MoorPy
-        P = ((21.9*10**3 * self.LineTypes[0]["MP_data"]["input_d"] ** 2) - (np.pi/4)*(1.89*self.LineTypes[0]["MP_data"]["input_d"])**2 * 1025) * 9.81 # Wet weight per meter (N/m). MoorProps for R4 sudlink chain. TODO: change this to Moorpy
-        self.LineTypes[0]["length"] = 15 + self.depth * np.sqrt(2*(self.LineTypes[0]["design_load"]/(P*self.depth))-1) # where P is the wet weight per meter. Assuming 15m on seabed. Eqn 5.15 from https://www.sciencedirect.com/book/9780128185513/mooring-system-engineering-for-offshore-structures
+        self.LineTypes[0]["length"] = 15 + self.depth * np.sqrt(2*((self.LineTypes[0]["design_load"]*1000)/(self.LineTypes[0]["MP_data"]["w"]*self.depth))-1) # Where ["MP_data"]["w"] is the wet weight in N/m. design_load converted from kN to N, and assumed to be max tension. Assuming 15m extra on seabed. Eqn 5.15 from https://www.sciencedirect.com/book/9780128185513/mooring-system-engineering-for-offshore-structures
 
         # Connection values
         self.con_cost = self.backend.getConnect(design_load=design_load) * self.LineTypes[0]["nCon"]
@@ -495,7 +493,7 @@ class model():
         # buoy values (optional)
         self.set_nBuoyTypes(0)
 
-    def set_paramsA1(self, shape = None, depth = None, soil_type = None, design_load = None, Buoy_Table = [], inflation_scale = 1):
+    def set_paramsA1(self, shape = "catenary", depth = None, soil_type = "sand", design_load = None, Buoy_Table = [], inflation_scale = 1):
         '''Calculates the mooring system parameters, including unit cost,
         based on a low level of user inputs (similar to existing SAM inputs). 
         
@@ -508,16 +506,19 @@ class model():
         soil_type : string
             the type of soil. Options are: soft clay, medium clay, hard clay, sand
         design_load : float
-            the design load of the system [N]
+            the design load of the system [kN]
         BuoyTable : list
             a list of lists containing buoy parameters. Values are: "Num of these buoys", "Buoyancy [kN]"
         inflation_scale : float
             value to scale costs by to account for inflation from 2024$
         '''
-        print("Using SAM level user provided parameters")
+        print("INFO: Using SAM level user provided parameters")
 
         # system values
         self.depth = depth
+
+        if self.depth < 50 and (shape == "semi-taut" or shape == "tension"):
+            print("WARNING: A1 may not be accurate in water depths less than 50 m for TLP's and semi-taut due to hardcoded assumptions")
         
         # inflation adjustment from 2024$
         self.inflation_scale = inflation_scale # optional
@@ -539,9 +540,7 @@ class model():
             self.LineTypes[0]["nAnch"] = 1
             self.LineTypes[0]["aLoadDir"] = 'horizontal'
             self.LineTypes[0]["nCon"] = 2
-            # find length
-            P = ((21.9*10**3 * self.LineTypes[0]["MP_data"]["input_d"] ** 2) - (np.pi/4)*(1.89*self.LineTypes[0]["MP_data"]["input_d"])**2 * 1025) * 9.81 # Wet weight per meter (N/m). MoorProps for R4 sudlink chain
-            self.LineTypes[0]["length"] = 15 + self.depth * np.sqrt(2*(self.LineTypes[0]["design_load"]/(P*self.depth))-1) # where P is the wet weight per meter. Assuming 15m on seabed. Eqn 5.15 from https://www.sciencedirect.com/book/9780128185513/mooring-system-engineering-for-offshore-structures
+            self.LineTypes[0]["length"] = 15 + self.depth * np.sqrt(2*((self.LineTypes[0]["design_load"]*1000)/(self.LineTypes[0]["MP_data"]["w"]*self.depth))-1) # Where ["MP_data"]["w"] is the wet weight in N/m. design_load converted from kN to N, and assumed to be max tension. Assuming 15m extra on seabed. Eqn 5.15 from https://www.sciencedirect.com/book/9780128185513/mooring-system-engineering-for-offshore-structures
 
         elif shape == "semi-taut":
             self.set_nLineTypes(2)
@@ -566,8 +565,8 @@ class model():
             self.LineTypes[0]["nCon"] = 1
             self.LineTypes[1]["nCon"] = 2
             # find length
-            self.LineTypes[0]["length"] = np.sqrt(2* self.depth**2) # Assuming 45 deg hang off, straight to seabed
-            self.LineTypes[1]["length"] = 15 # assuming 15m of chain on the seabed
+            self.LineTypes[0]["length"] = np.sqrt(2* self.depth**2) - 15 # Assuming 45 deg hang off, straight to seabed, 15 m short of seabed to avoid rope contact
+            self.LineTypes[1]["length"] = 100 + (400 * design_load /(2.5*10**3)) # assuming 100 m of chain on the seabed + factor that scales with design load. Factor based on 500m chain for a 2.5 MN avg load in the MoorDyn VIV paper example case (semi-taut)
 
         elif shape == "taut":
             self.set_nLineTypes(1)
@@ -599,7 +598,7 @@ class model():
             self.LineTypes[0]["aLoadDir"] = 'vertical'
             self.LineTypes[0]["nCon"] = 2
             # find length
-            self.LineTypes[0]["length"] = self.depth
+            self.LineTypes[0]["length"] = self.depth - 15 # -15 m assuming 15 m design wave heigh, fairleads never cross waterline
 
         else:
             raise Exception(f"Line shape {self.shape} is not supported")
@@ -650,10 +649,10 @@ class model():
             value to scale costs by to account for inflation from 2024$
         '''
 
-        print(f"Using MoorPy level parameters. {len(Line_Table)} different line types")
+        print(f"INFO: Using MoorDyn level parameters. {len(Line_Table)} different line types")
 
         # system values
-        self.depth = depth # unused. TODO: Do we get rid of it? Or add a check that intput line lengths are sufficient for depth?
+        self.depth = depth # unused
         
         # inflation adjustment from 2024$
         self.inflation_scale = inflation_scale # optional
@@ -666,7 +665,7 @@ class model():
             # Load line type data from MoorProps
             self.LineTypes[i]["MP_data"] = self.backend.getLine(material=line[1], diam=line[2], fos=line[3])
             self.LineTypes[i]["FOS"] = line[3]
-            self.LineTypes[i]["design_load"] = self.LineTypes[i]["MP_data"]["MBL"] / self.LineTypes[i]["FOS"]
+            self.LineTypes[i]["design_load"] = self.LineTypes[i]["MP_data"]["MBL"] / 1000 / self.LineTypes[i]["FOS"] # convert MBL from N to kN
             # user inputs 
             self.LineTypes[i]["num"] = line[0]
             self.LineTypes[i]["length"] = line[4]
@@ -718,7 +717,7 @@ class model():
             value to scale costs by to account for inflation from 2024$
         '''       
 
-        print("Using FAD level user provided parameters")
+        print("INFO: Using full user provided parameters")
 
         # system values
         self.depth = depth
@@ -734,7 +733,7 @@ class model():
             # Load line type data from MoorProps
             self.LineTypes[i]["MP_data"] = self.backend.getLine(material=line[1], diam=line[2], fos=line[3])
             self.LineTypes[i]["FOS"] = line[3]
-            self.LineTypes[i]["design_load"] = self.LineTypes[i]["MP_data"]["MBL"] / self.LineTypes[i]["FOS"]
+            self.LineTypes[i]["design_load"] = self.LineTypes[i]["MP_data"]["MBL"] / 1000 / self.LineTypes[i]["FOS"] # convert MBL from N to kN
             # user inputs
             self.LineTypes[i]["num"] = line[0]
             self.LineTypes[i]["length"] = line[4]
@@ -764,7 +763,9 @@ class model():
 
     def calc_cost(self):
         '''Calculates and prints the total cost of the mooring system based on the 
-        parameters loaded by the set_params functions
+        parameters loaded by the set_params functions. The costs stored in the types 
+        are the per unit costs (with the exception of connections), so they are 
+        multiplied by the number of each component.
         '''
         Line_cost = 0
         for lType in self.LineTypes:
@@ -791,15 +792,13 @@ class model():
             print(f"    Number     : {lType['num']}")
             print(f"    Length     : {lType['length']:.3f} m")
             print(f"    Diameter   : {lType['MP_data']['input_d']:.3f} m")
-            print(f"    design load: {lType['design_load']:.3f} N")
+            print(f"    design load: {lType['design_load']:.3f} kN")
         print(f"Anchor Parameters")
         for aType in self.AnchTypes:
             print(f"    Type       : {aType['kind']}")
             print(f"    Number     : {aType['num']}")
             print(f"    Mass       : {aType['mass']:.3f} kg")
             print(f"    Soil type  : {aType['soil_type']}")
-        # print(f"Connection Hardware Parameters")
-        # print(f"    Mass       : {self.con_mass:.3f} kg")
         print(f"Buoyancy Module Parameters")
         for bType in self.BuoyTypes:
             print(f"    Num Buoys  : {bType['num']}")
@@ -814,10 +813,11 @@ class model():
 
 if __name__ == "__main__":
     tool = model()
+    tool.load_database()
     # lines = [[1, "chain", 0.2, 100, "horizontal", 1]]
     # tool.set_paramsA2(Line_Table = lines, soil_type = "sand", depth = 100)
 
-    # tool.set_paramsA1(shape = "taut", depth = 100, design_load = 100000, soil_type = "soft clay")
+    tool.set_paramsA1(shape = "taut", depth = 100, design_load = 100000, soil_type = "soft clay")
 
-    tool.set_paramsA2(Line_Table = [[3,"polyester",.2,50,"none",0],[3,"chain",.1,20,"horizontal",1]],depth = 100, soil_type = "soft clay")
+    # tool.set_paramsA2(Line_Table = [[3,"polyester",.2,50,"none",0],[3,"chain",.1,20,"horizontal",1]],depth = 100, soil_type = "soft clay")
     tool.calc_cost()
