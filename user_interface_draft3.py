@@ -142,7 +142,7 @@ if __name__ == "__main__":
                     model = model_draft.model()
 
                     # load in data from MoorPy structures (TODO: do we even want users to know this? Or should it just be always defaults)
-                    inputs = ask("Used default mooring system properties? (y or <path to lineprops yaml>, <path to pointprops yaml>) ")
+                    inputs = ask("Use default mooring system properties? (y or <path to lineprops yaml>, <path to pointprops yaml>) ")
                     if inputs == "y": 
                         model.load_database()
                     elif (inputs != "y") and (", " not in inputs):
@@ -200,9 +200,9 @@ if __name__ == "__main__":
                         lines = ask_table(headers, answers, types, inputs1) # a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter (m)", "Length (m)"
 
                         inputs2 = ask("How many different anchor types are in your design? ", dtype="integer")
-                        headers = ["Num of these anchors", "Anchor type (drag-embedment, gravity, VLA, SEPLA, suction)", "Mass (kg)", "Soil type (soft clay, medium clay, hard clay, sand)"] # soilType unused
-                        answers = [None, ["drag-embedment", "gravity", "VLA", "SEPLA", "suction"], None, ["soft clay", "medium clay", "hard clay", "sand"]] # acceptable answers
-                        types = ["integer","string","float","string"] # data types for each entry
+                        headers = ["Num of these anchors", "Anchor type (drag-embedment, gravity, VLA, SEPLA, suction, driven)", "Mass (kg) [unused if VLA]", "Area (m^2) [only for VLA]", "Soil type (soft clay, medium clay, hard clay, sand)"] # soilType unused
+                        answers = [None, ["drag-embedment", "gravity", "VLA", "SEPLA", "suction", "driven"], None, ["soft clay", "medium clay", "hard clay", "sand"]] # acceptable answers
+                        types = ["integer","string","float","float","string"] # data types for each entry
                         anchors = ask_table(headers, answers, types, inputs2) # a list of lists, one for each anchor type in the system. Values are: "Num of these anchors", "Anchor type", "Mass (kg)", "Soil type"
 
                         model.set_paramsA3(Line_Table = lines, Anchor_Table = anchors, depth = depth, Buoy_Table = buoys) 

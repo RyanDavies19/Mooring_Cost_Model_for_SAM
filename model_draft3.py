@@ -182,7 +182,7 @@ class backend():
         return helpers.getLineProps(dnommm, material, lineProps = self.lineProps) # a moorpy lineType structure (dictionary)
 
     ### Point Stuff
-    def getAnchor(self, soil_type, a_type = None, load = None, load_dir = None, mass = None):
+    def getAnchor(self, soil_type, a_type = None, load = None, load_dir = None, mass = None, area = 0.0):
         '''This uses moorpy to calculate the anchor size needed 
         for a design load and mooring shape. This function also 
         handles autosizing and selection of anchor types based 
@@ -195,14 +195,16 @@ class backend():
         soli_type : string
             keyword that identifies the soil type. Options are: soft clay, medium clay, hard clay, sand
         a_type : string 
-            keyword that identifies the anchor type. Options are: drag-embedment, gravity, VLA, SEPLA, suction
+            keyword that identifies the anchor type. Options are: drag-embedment, gravity, VLA, SEPLA, suction, driven
         load : float
             the design load for the anchor [kN]
         load_dir : string
             keyword to identify anchor load direction. Options are: vertical, horizontal, both
         mass : float
             anchor mass [kg]
-        
+        area : float
+            anchor area [m^2] (only used for VLA)
+            
         Returns
         -------
         cost : float
@@ -258,6 +260,7 @@ class backend():
                 raise outputs
             
             mass = outputs[1] # outpus = uhc, mass, info
+            area = outputs[2]["Area"]
 
             print(f"INFO: '{a_type}' anchor mass set to {mass:.3f} kg for load direction '{load_dir}' and soil type '{soil_type}'" )
         
@@ -268,6 +271,7 @@ class backend():
         # overwrite structure in self.pointProps. Most basic struture that gives anchor data from PointProps_default.yaml to find costs with getPointProps
         aProps = self.pointProps["AnchorProps"]
         aProps[a_type]["mass"] = mass
+        aProps[a_type]["area"] = area
         
         props = dict(DesignProps = dict(anchor = {f"num_a_{a_type}" : 1}), AnchorProps = aProps, BuoyProps = dict(placeholder = "placeholder"), ConnectProps = dict(placeholder = "placeholder")) # this is a dummy pointprops starting point that mimics a pointprops yaml. Passing it to loadPointProps will initialize all the unused variables that are needed for the code.
         MP_data = helpers.getPointProps(design = "anchor", Props = helpers.loadPointProps(props))
@@ -368,6 +372,7 @@ class model():
     VLA <-- vertical Load
     SEPLA <-- suction plate embedment
     suction <-- suction pile
+    driven <-- driven pile
 
     Types of soil (case sensitive):
     -------------------------------
@@ -396,7 +401,7 @@ class model():
         '''Initializes the data structures for running the model, including the backend class'''
         # structures for tables
         self.line_type = {"id" : None, "num" : None, "MP_data" : None, "length" : None, "shape" : None, "design_load" : None, "FOS" : None, "nAnch" : None, "aLoadDir" : None, "nCon" : None}
-        self.anchor_type = {"id" : None, "num" : None, "kind" : None, "mass" : None, "soil_type" : None}
+        self.anchor_type = {"id" : None, "num" : None, "kind" : None, "mass" : None, "area" : None, "soil_type" : None}
         self.buoy_type = {"id" : None, "num" : None, "buoyancy" : None}
         self.backend = backend() # initialize the backend
 
@@ -708,7 +713,7 @@ class model():
         Line_Table : list
             a list of lists, one for each line type in the system. Values are: Line_Table: a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter [m]", "Factor of safety", "Length [m]", "Num connections per line"
         Anchor_Table : list
-            a list of lists, one for each anchor type in the system. Values are: "anchor type num", "anchor type", "anchor mass [kg]", "soil type"
+            a list of lists, one for each anchor type in the system. Values are: "anchor type num", "anchor type", "anchor mass [kg]", "anchor area [m^2]", "soil type"
         depth : float
             the water depth [m]
         BuoyTable : list
@@ -748,8 +753,9 @@ class model():
             self.AnchTypes[i]["num"] = anchor[0]
             self.AnchTypes[i]["kind"] = anchor[1]
             self.AnchTypes[i]["mass"] = anchor[2]
-            self.AnchTypes[i]["soil_type"] = anchor[3]
-            self.AnchTypes[i]["cost"], mass, kind = self.backend.getAnchor(self.AnchTypes[i]["soil_type"], a_type = self.AnchTypes[i]["kind"], mass = self.AnchTypes[i]["mass"] )
+            self.AnchTypes[i]["area"] = anchor[3]
+            self.AnchTypes[i]["soil_type"] = anchor[4]
+            self.AnchTypes[i]["cost"], mass, kind = self.backend.getAnchor(self.AnchTypes[i]["soil_type"], a_type = self.AnchTypes[i]["kind"], mass = self.AnchTypes[i]["mass"], area = self.AnchTypes[i]["area"])
 
         # buoy values (optional)
         self.set_nBuoyTypes(len(Buoy_Table))
