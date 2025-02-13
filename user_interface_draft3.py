@@ -32,7 +32,7 @@ def clear_console():
     else:
         print("NOTE: Cannot determine OS, outputs not cleared")
 
-def ask(string, answers = None, dtype = 'string', table = False): 
+def ask(string, answers = None, dtype = 'string', table = False, ignore_case = True): 
     '''asks for user inputs and checks for valid answers and types
     
     Parameters
@@ -43,8 +43,10 @@ def ask(string, answers = None, dtype = 'string', table = False):
         list of acceptable answers
     dtype : string
         required data type for user input
-    table : bool
+    table : bool (optional)
         flag to indicate if ask function is being called by the ask_table function
+    ignore_case : bool (optional)
+        flag to make answer checking case insensitive 
     
     Returns
     -------
@@ -54,7 +56,11 @@ def ask(string, answers = None, dtype = 'string', table = False):
     
     valid = False
     while not valid:
-        inp = input(string).lower()
+        
+        inp = input(string)
+        if ignore_case:
+            inp = inp.lower()
+
 
         if inp == "restart":
             print("Restarting...")
@@ -86,7 +92,7 @@ def ask(string, answers = None, dtype = 'string', table = False):
 
     return inp
 
-def ask_table(headers, answers, types, rows):
+def ask_table(headers, answers, types, rows, ignore_case = True):
     '''asks users to fill in a table
     
     Parameters
@@ -99,6 +105,8 @@ def ask_table(headers, answers, types, rows):
         a list of data types (string, float, or integer) for each header category
     rows : int
         the number of rows
+    ignore_case : bool (optional)
+        flag to make answer checking case insensitive 
     
     Returns
     -------
@@ -116,7 +124,7 @@ def ask_table(headers, answers, types, rows):
         table_i = []
         print(f"\n   Row {r+1}:")
         for i, header in enumerate(headers):
-            inp = ask("      "+header+": ", answers[i], types[i], table = True)
+            inp = ask("      "+header+": ", answers[i], types[i], table = True, ignore_case = ignore_case)
             table_i.append(inp)
         table.append(table_i)
 
@@ -182,28 +190,39 @@ if __name__ == "__main__":
                     elif inputs == "2": # line data 
 
                         inputs1 = ask("How many different line types are in your design? ", dtype="integer")
-                        headers = ["Num of these lines", "Line material (chain, polyester, nylon, wire, hmpe)", "Diameter (m)", "Factor of safety", "Length (m)", "Anchor load direction (none, horizontal, both, vertical)", "Number of anchors per line", "Num connections per line (ensure not double counting)"]
-                        answers = [None, ["chain", "polyester", "nylon", "wire", "hmpe"], None, None, None, ["none", "horizontal", "both", "vertical"], None, None] # acceptable answers
-                        types = ["integer","string","float","float","float","string","integer","integer"] # data types for each entry
+                        if inputs1 > 0:
+                            headers = ["Num of these lines", "Line material (chain, polyester, nylon, wire, hmpe)", "Diameter (m)", "Factor of safety", "Length (m)", "Anchor load direction (none, horizontal, both, vertical)", "Number of anchors per line", "Num connections per line (ensure not double counting)"]
+                            answers = [None, ["chain", "polyester", "nylon", "wire", "hmpe"], None, None, None, ["none", "horizontal", "both", "vertical"], None, None] # acceptable answers
+                            types = ["integer","string","float","float","float","string","integer","integer"] # data types for each entry
 
-                        lines = ask_table(headers, answers, types, inputs1)  # a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter (m)", "Length (m)", "Anchor load direction", "Number of anchors for line"
+                            lines = ask_table(headers, answers, types, inputs1)  # a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter (m)", "Length (m)", "Anchor load direction", "Number of anchors for line"
 
-                        inputs2 = ask("Soil type (soft clay, medium clay, hard clay, sand)? ", ["soft clay", "medium clay", "hard clay", "sand"])
+                            inputs2 = ask("Soil type (soft clay, medium clay, hard clay, sand)? ", ["soft clay", "medium clay", "hard clay", "sand"])
 
-                        model.set_paramsA2(Line_Table = lines, depth = depth, soil_type = inputs2, Buoy_Table = buoys)
+                            model.set_paramsA2(Line_Table = lines, depth = depth, soil_type = inputs2, Buoy_Table = buoys)
+                        
+                        else: 
+                            print("1 or more lines required for the line data option. Restarting...")
+                            raise Restart
 
                     elif inputs == "3": # full mooring data
                         inputs1 = ask("How many different line types are in your design? ", dtype="integer")
-                        headers = ["Num of these lines", "Line material (chain, polyester, nylon, wire, hmpe)", "Diameter (m)", "Factor of safety", "Length (m)", "Num connections (ensure not double counting)"]
-                        answers = [None, ["chain", "polyester", "nylon", "wire", "hmpe"], None, None, None, None] # acceptable answers
-                        types = ["integer","string","float","float","float","float"] # data types for each entry
-                        lines = ask_table(headers, answers, types, inputs1) # a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter (m)", "Length (m)"
+                        if inputs1 > 0:
+                            headers = ["Num of these lines", "Line material (chain, polyester, nylon, wire, hmpe)", "Diameter (m)", "Factor of safety", "Length (m)", "Num connections (ensure not double counting)"]
+                            answers = [None, ["chain", "polyester", "nylon", "wire", "hmpe"], None, None, None, None] # acceptable answers
+                            types = ["integer","string","float","float","float","float"] # data types for each entry
+                            lines = ask_table(headers, answers, types, inputs1) # a list of lists, one for each line type in the system. Values are: "Num of these lines", "Line material", "Diameter (m)", "Length (m)"
+                        else: # if no lines just an empty list
+                            lines = []
 
                         inputs2 = ask("How many different anchor types are in your design? ", dtype="integer")
-                        headers = ["Num of these anchors", "Anchor type (drag-embedment, gravity, VLA, SEPLA, suction, driven)", "Mass (kg) [unused if VLA]", "Area (m^2) [only for VLA]", "Soil type (soft clay, medium clay, hard clay, sand)"] # soilType unused
-                        answers = [None, ["drag-embedment", "gravity", "VLA", "SEPLA", "suction", "driven"], None, ["soft clay", "medium clay", "hard clay", "sand"]] # acceptable answers
-                        types = ["integer","string","float","float","string"] # data types for each entry
-                        anchors = ask_table(headers, answers, types, inputs2) # a list of lists, one for each anchor type in the system. Values are: "Num of these anchors", "Anchor type", "Mass (kg)", "Soil type"
+                        if inputs2 > 0:
+                            headers = ["Num of these anchors", "Anchor type (drag-embedment, gravity, VLA, SEPLA, suction, driven) [case sensitive]", "Mass (kg) [unused if VLA]", "Area (m^2) [only for VLA]", "Soil type (soft clay, medium clay, hard clay, sand)"] # soilType unused
+                            answers = [None, ["drag-embedment", "gravity", "VLA", "SEPLA", "suction", "driven"], None, None, ["soft clay", "medium clay", "hard clay", "sand"]] # acceptable answers
+                            types = ["integer","string","float","float","string"] # data types for each entry
+                            anchors = ask_table(headers, answers, types, inputs2, ignore_case = False) # a list of lists, one for each anchor type in the system. Values are: "Num of these anchors", "Anchor type", "Mass (kg)", "Soil type"
+                        else: # if no anchors just an empty list
+                            anchors = []
 
                         model.set_paramsA3(Line_Table = lines, Anchor_Table = anchors, depth = depth, Buoy_Table = buoys) 
 

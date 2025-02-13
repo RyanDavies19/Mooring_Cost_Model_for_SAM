@@ -30,9 +30,9 @@ class backend():
 
     def __init__(self):
         '''initializes the class'''        
-        pass
+        self.point_num = 0 # counter for point ID's for interfacing with MoorPy
 
-    # load in MoorPy data from YAMLs
+    # load in MoorPy data from YAMLs and set up dummy MP system
     def load(self, path = None):
         '''Loads the line and point props dictionaries using the respective MoorPy.helpers methods
         
@@ -43,11 +43,9 @@ class backend():
         '''
         
         if path == None:
-            self.lineProps = helpers.loadLineProps(path)
-            self.pointProps = helpers.loadPointProps(path)
+            self.ms = mp.System(lineProps=path, pointProps=path) # set up an empty MP system that contains the props
         else:
-            self.lineProps = helpers.loadLineProps(path[0])
-            self.pointProps = helpers.loadPointProps(path[1])  
+            self.ms = mp.System(lineProps=path[0], pointProps=path[1]) # set up an empty MP system that contains the props
 
     ### Line Stuff
     def calc_diam(self, mbl = 0.0, mbl_0 = 0.0, mbl_d = 0.0, mbl_d2 = 0.0, mbl_d3 = 0.0, curve_min = -1, curve_max = -1):
@@ -111,7 +109,7 @@ class backend():
     def find_diam(self, load, material, fos = 1):
         '''Given a line material and design load return the line diameter that
         provides the design load. This serves to wrap the calc_diam function and
-        pass the values in self.lineProps for the respective material. 
+        pass the values in self.ms.lineProps for the respective material. 
         
         Parameters
         ----------
@@ -128,7 +126,7 @@ class backend():
             the diameter of the line that meets the design load [m]
         '''
         
-        mat = self.lineProps[material]       # shorthand for the sub-dictionary of properties for the material in question 
+        mat = self.ms.lineProps[material]       # shorthand for the sub-dictionary of properties for the material in question 
         
         line_diam = self.calc_diam(mbl = load * fos, mbl_0 = mat['MBL_0'], mbl_d = mat['MBL_d'], mbl_d2 = mat['MBL_d2'], mbl_d3 = mat['MBL_d3'], curve_min = mat['MBL_dmin'], curve_max = mat['MBL_dmax'])
 
@@ -179,7 +177,7 @@ class backend():
         else:
             raise Exception("Somethings not right")
         
-        return helpers.getLineProps(dnommm, material, lineProps = self.lineProps) # a moorpy lineType structure (dictionary)
+        return helpers.getLineProps(dnommm, material, lineProps = self.ms.lineProps) # a moorpy lineType structure (dictionary)
 
     ### Point Stuff
     def getAnchor(self, soil_type, a_type = None, load = None, load_dir = None, mass = None, area = 0.0):
@@ -260,23 +258,29 @@ class backend():
                 raise outputs
             
             mass = outputs[1] # outpus = uhc, mass, info
-            area = outputs[2]["Area"]
+            if "Area" in outputs[2].keys():
+                area = outputs[2]["Area"]
+            else:
+                area = 0.0 # if there is no area value from getAnchorMass then set to 0
 
             print(f"INFO: '{a_type}' anchor mass set to {mass:.3f} kg for load direction '{load_dir}' and soil type '{soil_type}'" )
         
         else:
             if mass == None and a_type == None:
                 raise ValueError("Invalid input combo to getAnchor")
+
+        # make a design
+        design = {f"num_a_{a_type}":1} # TODO: include hardware?
+        pointType = self.ms.setPointType(design)
         
-        # overwrite structure in self.pointProps. Most basic struture that gives anchor data from PointProps_default.yaml to find costs with getPointProps
-        aProps = self.pointProps["AnchorProps"]
-        aProps[a_type]["mass"] = mass
-        aProps[a_type]["area"] = area
-        
-        props = dict(DesignProps = dict(anchor = {f"num_a_{a_type}" : 1}), AnchorProps = aProps, BuoyProps = dict(placeholder = "placeholder"), ConnectProps = dict(placeholder = "placeholder")) # this is a dummy pointprops starting point that mimics a pointprops yaml. Passing it to loadPointProps will initialize all the unused variables that are needed for the code.
-        MP_data = helpers.getPointProps(design = "anchor", Props = helpers.loadPointProps(props))
-    
-        return MP_data["cost"], MP_data["m"], a_type
+        # make a point w/ design
+        self.point_num += 1 # update the point number counter
+        point = mp.Point(self.ms, self.point_num, 1, [0,0,0], typeData = pointType, m=mass, a=area) # 0,0,0 location is dummy variable to make error checks happy
+
+        # getCost_and_MBL
+        cost, MBL, info = point.getCost_and_MBL()
+
+        return cost, point.m, a_type
     
     def getBuoy(self, buoyancy):
         '''Determines the cost of a buoy based on the defaults in MoorPy.
@@ -294,14 +298,18 @@ class backend():
         if buoyancy < 0: 
             raise Exception("Buoyancy must be greater than zero")
 
-        # overwrite structure in self.pointProps. Most basic struture that gives buoys data from PointProps_default.yaml
-        bProps = self.pointProps["BuoyProps"]
-        bProps["general"]["buoyancy"] = buoyancy 
-        props = dict(DesignProps = dict(buoy = {"num_b_general" : 1}), AnchorProps = dict(placeholder = "placeholder"), BuoyProps = bProps, ConnectProps = dict(placeholder = "placeholder")) # this is a dummy pointprops starting point that mimics a pointprops yaml. Passing it to loadPointProps will initialize all the unused variables that are needed for the code.
+        # make a design
+        design = {"num_b_general":1} # single buoy. TODO: include hardware?
+        pointType = self.ms.setPointType(design)
         
-        MP_data = helpers.getPointProps(design = "buoy", Props = helpers.loadPointProps(props)) # a moorpy pointType structure (dictionary)
+        # make a point w/ design
+        self.point_num += 1 # update the point number counter
+        point = mp.Point(self.ms, self.point_num, 0, [0,0,0], typeData = pointType) # 0,0,0 location is dummy variable to make error checks happy
 
-        return MP_data["cost"]
+        # getCost_and_MBL
+        cost, MBL, info = point.getCost_and_MBL(buoyancy = buoyancy)
+
+        return cost
 
     def getConnect(self, design_load):
         '''Given a design load, calculates the cost of a connection.
@@ -320,11 +328,19 @@ class backend():
         '''        
         if design_load < 0: 
             raise Exception("Design load must be greater than zero")
-        
-        # general type uses the PointProps general design
-        MP_data = helpers.getPointProps(design_load = design_load, design = "general", Props = self.pointProps) # a moorpy pointType structure (dictionary)
 
-        return MP_data["cost"] # only cost data reutrned for now, mass coefficients not yet known
+        # make a design
+        design = "general" # use the general design from PointProps_default
+        pointType = self.ms.setPointType(design)
+        
+        # make a point w/ design
+        self.point_num += 1 # update the point number counter
+        point = mp.Point(self.ms, self.point_num, 0, [0,0,0], typeData = pointType) # 0,0,0 location is dummy variable to make error checks happy
+
+        # getCost_and_MBL
+        cost, MBL, info = point.getCost_and_MBL(peak_tension=design_load)
+
+        return cost
 
 # User interface class and functions
 class model():
@@ -519,6 +535,11 @@ class model():
         '''
         print("INFO: Using SAM level user provided parameters")
 
+        # check table lengths
+        if len(Buoy_Table) > 0:
+            if len(Buoy_Table[0]) != 2:
+                raise Exception("Buoy table must have 2 columns")
+
         # system values
         self.depth = depth
 
@@ -656,6 +677,16 @@ class model():
 
         print(f"INFO: Using MoorDyn level parameters. {len(Line_Table)} different line types")
 
+        # check table lengths
+        if len(Line_Table) > 0:
+            if len(Line_Table[0]) != 8:
+                raise Exception("Line table in A2 must have 8 columns")
+        else:
+            raise Exception("Lines required for A2")
+        if len(Buoy_Table) > 0:
+            if len(Buoy_Table[0]) != 2:
+                raise Exception("Buoy table must have 2 columns")
+
         # system values
         self.depth = depth # unused
         
@@ -704,7 +735,7 @@ class model():
             self.BuoyTypes[i]["buoyancy"]= buoy[1] # kN
             self.BuoyTypes[i]["cost"] = self.backend.getBuoy(self.BuoyTypes[i]["buoyancy"])
 
-    def set_paramsA3(self, Line_Table = None, Anchor_Table = None, depth = None, Buoy_Table = [], inflation_scale = 1):
+    def set_paramsA3(self, Line_Table, Anchor_Table, depth, Buoy_Table = [], inflation_scale = 1):
         '''Calculates the mooring system parameters, including unit 
         cost, based on a high level of user inputs. 
         
@@ -716,13 +747,24 @@ class model():
             a list of lists, one for each anchor type in the system. Values are: "anchor type num", "anchor type", "anchor mass [kg]", "anchor area [m^2]", "soil type"
         depth : float
             the water depth [m]
-        BuoyTable : list
+        BuoyTable : list (optional)
             a list of lists containing buoy parameters. Values are: "Num of these buoys", "Buoyancy [kN]"
-        inflation_scale : float
+        inflation_scale : float (optional)
             value to scale costs by to account for inflation from 2024$
         '''       
 
         print("INFO: Using full user provided parameters")
+
+        # check table lengths
+        if len(Line_Table) > 0:
+            if len(Line_Table[0]) != 6:
+                raise Exception("Line table in A3 must have 6 columns")
+        if len(Anchor_Table) > 0:
+            if len(Anchor_Table[0]) != 5:
+                raise Exception("Anchor table in A3 must have 5 columns")
+        if len(Buoy_Table) > 0:
+            if len(Buoy_Table[0]) != 2:
+                raise Exception("Buoy table must have 2 columns")
 
         # system values
         self.depth = depth
