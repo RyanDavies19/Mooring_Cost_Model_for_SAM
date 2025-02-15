@@ -307,7 +307,7 @@ class backend():
         point = mp.Point(self.ms, self.point_num, 0, [0,0,0], typeData = pointType) # 0,0,0 location is dummy variable to make error checks happy
 
         # getCost_and_MBL
-        cost, MBL, info = point.getCost_and_MBL(buoyancy = buoyancy)
+        cost, MBL, info = point.getCost_and_MBL(buoyancy = buoyancy*1000) # convert buoyancy from kN to N
 
         return cost
 
@@ -338,7 +338,7 @@ class backend():
         point = mp.Point(self.ms, self.point_num, 0, [0,0,0], typeData = pointType) # 0,0,0 location is dummy variable to make error checks happy
 
         # getCost_and_MBL
-        cost, MBL, info = point.getCost_and_MBL(peak_tension=design_load)
+        cost, MBL, info = point.getCost_and_MBL(peak_tension=design_load*1000) # convert design_load from kN to N
 
         return cost
 
